@@ -1,0 +1,82 @@
+# .gitignore for Godot and Python projects
+
+# ------ Godot -------
+.import/
+.export/
+.godot/
+.mono/
+export_presets.cfg
+
+# ------ Python ------
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+.eggs/
+parts/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+env/
+venv.bak/
+env.bak/
+
+# Pytest
+.pytest_cache/
+.cache/
+
+# Editors/IDEs
+.vscode/
+.idea/
+
+# Mypy, pipenv, poetry
+.mypy_cache/
+pip-wheel-metadata/
+Pipfile.lock
+poetry.lock
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# Local settings
+local_settings.py
+
+# macOS
+.DS_Store
+
+# ------ BMAD Method ------
+# Ignore BMAD runtime and output artifacts (from bmad-method)
+.memlog.md
+_bmad/
+_bmad-output/
+.augment/
+.augment/*
+!.augment/code_review_guidelines.yaml
+
+# Ignore local agent and tooling folders
+.agents/
+.github/agents/
+
+# Blender backup/temporary files (e.g. rig.blend1, rig.blend2)
+*.blend[0-9]*
+*.blend1
+*.blend2
+*.blend3
+

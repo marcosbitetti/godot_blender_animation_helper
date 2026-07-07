@@ -108,7 +108,7 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
                                 _, bone_name = k.split(":", 1)
                                 bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
 
-                response = {"armature_name": arm, "arnature_name": arm, "bones": bones_list}
+                response = {"armature_name": arm, "bones": bones_list}
                 self._send_json(response)
             else:
                 self._send_json({"error": "not found"}, status=404)

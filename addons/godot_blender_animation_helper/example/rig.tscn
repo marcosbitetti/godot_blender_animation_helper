@@ -1,0 +1,14 @@
+[gd_scene format=3 uid="uid://bgfvak63c5hgh"]
+
+[ext_resource type="PackedScene" uid="uid://d0y3nr3r2clc7" path="res://addons/godot_blender_animation_helper/example/rig.glb" id="1_mtqaj"]
+[ext_resource type="Script" uid="uid://bixojhvi0rn2r" path="res://addons/godot_blender_animation_helper/godot/rig_sync.gd" id="2_nktgo"]
+
+[node name="Rig" type="Node3D" unique_id=988870244]
+
+[node name="rig" parent="." unique_id=1143913702 instance=ExtResource("1_mtqaj")]
+
+[node name="BlenderRigSync" type="Node" parent="." unique_id=1869580874]
+script = ExtResource("2_nktgo")
+metadata/_custom_type_script = "uid://bixojhvi0rn2r"
+
+[editable path="rig"]
