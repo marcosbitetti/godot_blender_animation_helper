@@ -1,4 +1,5 @@
 @tool
+@icon("res://addons/godot_blender_animation_helper/godot/icon.svg")
 extends Node
 class_name BlenderRigSync
 
@@ -15,6 +16,9 @@ class_name BlenderRigSync
 		if enabled: _do_request()
 
 @export_range(.15, 1., .05) var refresh_time : float = .25
+
+@export var debug := false
+
 
 var _connected := false
 var _http : HTTPRequest
@@ -51,11 +55,16 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 	
 	_connected = response_code == HTTPClient.RESPONSE_OK
 	update_configuration_warnings()
+	var had_bones := false
 	if _skeleton:
-		_apply_bones_from_body(body)
+		had_bones = _apply_bones_from_body(body)
 
 	if enabled:
-		get_tree().create_timer(refresh_time).timeout.connect(_do_request)
+		if had_bones:
+			# immediate re-request for low-latency updates
+			_do_request()
+		else:
+			get_tree().create_timer(refresh_time).timeout.connect(_do_request)
 
 func _on_http_connection_timeout() -> void:
 	_connected = false
@@ -65,29 +74,32 @@ func _find_skel() -> void:
 	_skeleton = get_parent().find_child(skeleton_name, true, false)
 
 func _do_request() -> void:
-	_http.request("http://127.0.0.1:8872/bones", PackedStringArray(),HTTPClient.METHOD_GET)
+	_http.request("http://127.0.0.1:8872/bones", PackedStringArray(), HTTPClient.METHOD_GET)
 
-func _apply_bones_from_body(body: PackedByteArray) -> void:
-	if body == null: return
+func _apply_bones_from_body(body: PackedByteArray) -> bool:
+	if body == null:
+		return false
 
 	var body_text := body.get_string_from_utf8()
 	var parse_result = JSON.parse_string(body_text)
 	if parse_result == null:
-		print("BlenderRigSync: failed to parse JSON body: %s" % parse_result.error_string)
-		return
+		if debug:
+			push_error("BlenderRigSync: failed to parse JSON body")
+		return false
 
 	var data : Dictionary = parse_result
 	
-	if not data.has("bones"): return
+	if not data.has("bones"): return false
 
 	var bones : Array = data["bones"]
+	var applied := false
 	
 	for item in bones:
 		if typeof(item) != TYPE_DICTIONARY:
 			continue
 		var name := item.get("name", "") as String
-		var m : = item.get("tr", null)  as Array
-		if name == "" or tr == null:
+		var m = item.get("tr", null) as Array
+		if name == "" or m == null:
 			continue
 		if typeof(m) != TYPE_ARRAY or m.size() < 12:
 			continue
@@ -112,8 +124,12 @@ func _apply_bones_from_body(body: PackedByteArray) -> void:
 			var idx := _skeleton.find_bone(name)
 			if idx >= 0:
 				_skeleton.set_bone_global_pose_override(idx, transform, 1.0, true)
+				applied = true
 		else:
-			print("BlenderRigSync: parsed bone %s (no skeleton apply)" % name)
+				if debug:
+					print("BlenderRigSync: parsed bone %s (no skeleton apply)" % name)
+
+	return applied
 
 func _blender_to_godot_vec3(v: Vector3) -> Vector3:
 	# Map Blender coordinates (X right, Y forward, Z up)

@@ -19,18 +19,21 @@ bl_info = {
 
 from bpy.props import BoolProperty, IntProperty
 
-# Dicionário global para armazenar o último estado das matrizes dos bones
-# Isso evita que o evento seja disparado continuamente mesmo se o bone estiver parado
+# Global dictionary to store the last known bone matrices.
+# This prevents firing the update event continuously when a bone hasn't changed.
 _last_bone_matrices = {}
 _matrices_lock = threading.RLock()
 _last_active_armature = None
 _pending_updates = {}
+# Condition variable used by request handlers to support long-poll waiting.
+_pending_updates_cond = threading.Condition(_matrices_lock)
 
 # HTTP server configuration
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 8872
 _server = None
 _server_thread = None
+LONGPOLL_DEFAULT_TIMEOUT = 5.0
 
 # Use a server class that allows address reuse to avoid "address already in use" on restart
 class _ReusableThreadingHTTPServer(http.server.ThreadingHTTPServer):
@@ -44,26 +47,32 @@ def _debug_print(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def meu_evento_bone_movido(bone_name, nova_matriz):
+def on_bone_moved(bone_name, new_matrix):
     """
-    Este é o seu método/evento. Tudo o que quiser fazer com a nova 
-    matriz do bone (enviar para uma API, salvar em arquivo, etc.) deve começar aqui.
+    Event hook called when a bone transform changes.
+    Extend this to send transforms to an API, write to a file, etc.
     """
-    # Avoid heavy prints in normal operation; enable DEBUG to see these logs
-    _debug_print(f"➔ [EVENTO] O bone '{bone_name}' mudou de posição!")
-    _debug_print(f"Nova Matriz Mundial:\n{nova_matriz}\n")
+    # Keep lightweight by default; enable DEBUG to see these logs.
+    _debug_print(f"➔ [EVENT] Bone '{bone_name}' moved")
+    _debug_print(f"World matrix:\n{new_matrix}\n")
 
 
 @bpy.app.handlers.persistent
-def checar_movimento_bone(scene, depsgraph):
+def check_bone_movement(scene, depsgraph):
+    """
+    Handler attached to `depsgraph_update_post` that inspects the active
+    armature in Pose mode and records world-space bone matrices.
+    When a bone's world matrix changes, `on_bone_moved` is triggered and
+    a pending update is queued for HTTP clients.
+    """
     global _last_bone_matrices, _last_active_armature, _pending_updates
 
-    # Verifica se há um objeto ativo e se ele é uma Armature no modo de Pose
+    # Only operate when an armature is the active object and in Pose mode
     obj = bpy.context.active_object
     if not obj or obj.type != 'ARMATURE' or obj.mode != 'POSE':
         return
 
-    # Usamos o depsgraph para obter os dados avaliados em tempo real (incluindo constraints e IKs)
+    # Use the evaluated object (includes constraints/IK) for accurate transforms
     obj_eval = obj.evaluated_get(depsgraph)
     matrix_world = obj_eval.matrix_world
 
@@ -81,23 +90,28 @@ def checar_movimento_bone(scene, depsgraph):
         if not deform:
             continue
 
-        # Calcula a matriz do bone no espaço do mundo (World Space)
-        # Se preferir no espaço local da armature, use apenas: pose_bone.matrix
+        # Compute the bone matrix in world space. For armature-local matrices
+        # use `pose_bone.matrix` instead.
         world_matrix = matrix_world @ pose_bone.matrix
 
         bone_id = f"{armature_name}:{pose_bone.name}"
 
-        # Protege acesso ao dicionário com um lock para a leitura via webserver
+        # Protect access to the shared dictionaries using a lock
         with _matrices_lock:
             prev = _last_bone_matrices.get(bone_id)
             if prev is not None:
                 if world_matrix != prev:
-                    # A matriz mudou! Dispara o seu evento customizado
-                    meu_evento_bone_movido(pose_bone.name, world_matrix.copy())
-                    # armazena atualização pendente para o endpoint /bones (será consumida na leitura)
+                    # Matrix changed: trigger the event hook and queue update
+                    on_bone_moved(pose_bone.name, world_matrix.copy())
                     _pending_updates[bone_id] = world_matrix.copy()
+                    try:
+                        # Notify any long-poll waiters that an update is available
+                        with _pending_updates_cond:
+                            _pending_updates_cond.notify_all()
+                    except Exception:
+                        pass
 
-            # Atualiza o dicionário com a matriz atual
+            # Update the cache with the current matrix
             _last_bone_matrices[bone_id] = world_matrix.copy()
 
 
@@ -109,7 +123,9 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
             if path in ("/", "/status"):
                 self._send_json({"status": "ok"})
             elif path in ("/bones", "/bones/"):
-                # Return and consume only the bones that were updated since last read.
+                # /bones supports long-poll semantics with a fixed timeout configured
+                # by the LONGPOLL_DEFAULT_TIMEOUT constant (query params are ignored).
+
                 with _matrices_lock:
                     arm = _last_active_armature
                     # fallback: pick any armature seen if none recorded yet
@@ -117,16 +133,31 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
                         arm_names = {k.split(":", 1)[0] for k in _last_bone_matrices.keys()} if _last_bone_matrices else set()
                         arm = next(iter(arm_names), None)
 
-                    bones_list = []
-                    if arm:
-                        prefix = f"{arm}:"
-                        # collect keys to pop to avoid modifying dict during iteration
-                        keys = [k for k in _pending_updates.keys() if k.startswith(prefix)]
-                        for k in keys:
-                            v = _pending_updates.pop(k, None)
-                            if v is not None:
-                                _, bone_name = k.split(":", 1)
-                                bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
+                bones_list = []
+                prefix = f"{arm}:" if arm else None
+
+                # Fast path: drain pending updates if any
+                with _matrices_lock:
+                    keys = [k for k in _pending_updates.keys() if not prefix or k.startswith(prefix)]
+                    for k in keys:
+                        v = _pending_updates.pop(k, None)
+                        if v is not None:
+                            _, bone_name = k.split(":", 1)
+                            bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
+
+                # If nothing available yet, wait up to `timeout` seconds for new updates
+                if not bones_list:
+                    deadline = time.time() + LONGPOLL_DEFAULT_TIMEOUT
+                    with _pending_updates_cond:
+                        while time.time() < deadline and not bones_list:
+                            remaining = deadline - time.time()
+                            _pending_updates_cond.wait(remaining)
+                            keys = [k for k in _pending_updates.keys() if not prefix or k.startswith(prefix)]
+                            for k in keys:
+                                v = _pending_updates.pop(k, None)
+                                if v is not None:
+                                    _, bone_name = k.split(":", 1)
+                                    bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
 
                 response = {"armature_name": arm, "bones": bones_list}
                 self._send_json(response)
@@ -174,7 +205,7 @@ def _serialize_matrix(matrix):
 def _start_server():
     global _server, _server_thread
     if _server is not None:
-        print("HTTP server already running.")
+        _debug_print("HTTP server already running.")
         return
     try:
         server_address = (SERVER_HOST, SERVER_PORT)
@@ -183,9 +214,9 @@ def _start_server():
         _server = httpd
         _server_thread = threading.Thread(target=_server.serve_forever, name="RigSyncHTTPServer", daemon=True)
         _server_thread.start()
-        print(f"RigSync HTTP server started at http://{SERVER_HOST}:{SERVER_PORT}/")
+        _debug_print(f"RigSync HTTP server started at http://{SERVER_HOST}:{SERVER_PORT}/")
     except Exception as e:
-        print("Failed to start HTTP server:", e)
+        _debug_print("Failed to start HTTP server:", e)
         _server = None
         _server_thread = None
 
@@ -195,7 +226,7 @@ def _stop_server():
     if _server is None:
         return
     try:
-        print("Shutting down RigSync HTTP server...")
+        _debug_print("Shutting down RigSync HTTP server...")
         # ask server to stop
         try:
             _server.shutdown()
@@ -232,26 +263,26 @@ def _stop_server():
         except Exception:
             pass
     except Exception as e:
-        print("Error stopping server:", e)
+        _debug_print("Error stopping server:", e)
     finally:
         _server = None
         _server_thread = None
-        print("RigSync HTTP server stopped.")
+        _debug_print("RigSync HTTP server stopped.")
 
 
 def start_rigsync_server():
     # ensure previous server state stopped to avoid duplicates
     stop_rigsync_server()
 
-    # Adiciona o listener ao depsgraph (pós-atualização de dependências)
+    # Attach the depsgraph handler (post update) and start the HTTP server
     try:
-        bpy.app.handlers.depsgraph_update_post.append(checar_movimento_bone)
+        bpy.app.handlers.depsgraph_update_post.append(check_bone_movement)
     except Exception as e:
-        print("Warning: could not append handler:", e)
+        _debug_print("Warning: could not append handler:", e)
 
     # Start internal HTTP server
     _start_server()
-    print("RigSync server ACTIVATED.")
+    _debug_print("RigSync server ACTIVATED.")
 
 
 def stop_rigsync_server():
@@ -259,8 +290,8 @@ def stop_rigsync_server():
     try:
         handlers = bpy.app.handlers.depsgraph_update_post
         # remove all occurrences to ensure handler is fully unregistered
-        while checar_movimento_bone in handlers:
-            handlers.remove(checar_movimento_bone)
+        while check_bone_movement in handlers:
+            handlers.remove(check_bone_movement)
     except Exception:
         pass
 
@@ -272,7 +303,7 @@ def stop_rigsync_server():
         _last_bone_matrices.clear()
         _last_active_armature = None
         _pending_updates.clear()
-    print("RigSync server DEACTIVATED.")
+    _debug_print("RigSync server DEACTIVATED.")
 
 
 # UI integration: a simple checkbox in the N-panel to enable/disable the server
@@ -305,7 +336,7 @@ def register():
         default=False,
         update=_on_rig_sync_toggle,
     )
-    print("Rig Sync addon registered")
+    _debug_print("Rig Sync addon registered")
 
 
 def unregister():
@@ -319,9 +350,9 @@ def unregister():
     except Exception:
         pass
     bpy.utils.unregister_class(RIGSYNC_PT_panel)
-    print("Rig Sync addon unregistered")
+    _debug_print("Rig Sync addon unregistered")
 
 
 if __name__ == "__main__":
-    print("Iniciando o plugin de monitoramento de Bones...")
+    _debug_print("Starting RigSync addon (standalone run)")
     register()

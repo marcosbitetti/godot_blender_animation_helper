@@ -7,7 +7,7 @@
 
 [node name="rig" parent="." unique_id=1143913702 instance=ExtResource("1_mtqaj")]
 
-[node name="BlenderRigSync" type="Node" parent="." unique_id=1869580874]
+[node name="BlenderRigSync" type="Node" parent="." unique_id=1554027632]
 script = ExtResource("2_nktgo")
 metadata/_custom_type_script = "uid://bixojhvi0rn2r"
 
