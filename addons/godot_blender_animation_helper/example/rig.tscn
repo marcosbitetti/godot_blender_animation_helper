@@ -7,8 +7,9 @@
 
 [node name="rig" parent="." unique_id=1143913702 instance=ExtResource("1_mtqaj")]
 
-[node name="BlenderRigSync" type="Node" parent="." unique_id=1554027632]
+[node name="BlenderRigSync" type="Node" parent="." unique_id=1494717528]
 script = ExtResource("2_nktgo")
+debug = false
 metadata/_custom_type_script = "uid://bixojhvi0rn2r"
 
 [editable path="rig"]

@@ -27,6 +27,9 @@ _last_active_armature = None
 _pending_updates = {}
 # Condition variable used by request handlers to support long-poll waiting.
 _pending_updates_cond = threading.Condition(_matrices_lock)
+# Track clients (by IP) that already requested a full snapshot so that
+# subsequent requests return only changes. Uses host IP to identify clients.
+_seen_clients = set()
 
 # HTTP server configuration
 SERVER_HOST = "127.0.0.1"
@@ -123,8 +126,14 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
             if path in ("/", "/status"):
                 self._send_json({"status": "ok"})
             elif path in ("/bones", "/bones/"):
-                # /bones supports long-poll semantics with a fixed timeout configured
-                # by the LONGPOLL_DEFAULT_TIMEOUT constant (query params are ignored).
+                # /bones supports long-poll semantics.
+                # Behavior:
+                # - When a new connection from a client arrives, return a full
+                #   snapshot of eligible (deform) bones for the current armature.
+                # - After that, the same client will receive only changed bones
+                #   (long-poll). If a client's long-poll times out with no
+                #   updates, the client is considered disconnected and the next
+                #   connection will receive a full snapshot again.
 
                 with _matrices_lock:
                     arm = _last_active_armature
@@ -133,10 +142,39 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
                         arm_names = {k.split(":", 1)[0] for k in _last_bone_matrices.keys()} if _last_bone_matrices else set()
                         arm = next(iter(arm_names), None)
 
-                bones_list = []
                 prefix = f"{arm}:" if arm else None
 
-                # Fast path: drain pending updates if any
+                bones_list = []
+
+                # Identify client by remote host IP (no query params allowed).
+                client_host = None
+                try:
+                    client_host = self.client_address[0]
+                except Exception:
+                    client_host = None
+
+                # If we have not yet given this client a full snapshot for its
+                # current session, return a full list now and mark it seen.
+                first_for_client = False
+                with _matrices_lock:
+                    if client_host and client_host not in _seen_clients:
+                        first_for_client = True
+
+                if first_for_client:
+                    with _matrices_lock:
+                        for k, v in _last_bone_matrices.items():
+                            if prefix and not k.startswith(prefix):
+                                continue
+                            _, bone_name = k.split(":", 1)
+                            bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
+                        if client_host:
+                            _seen_clients.add(client_host)
+
+                    response = {"armature_name": arm, "bones": bones_list}
+                    self._send_json(response)
+                    return
+
+                # Normal mode: drain pending updates if any
                 with _matrices_lock:
                     keys = [k for k in _pending_updates.keys() if not prefix or k.startswith(prefix)]
                     for k in keys:
@@ -145,7 +183,8 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
                             _, bone_name = k.split(":", 1)
                             bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
 
-                # If nothing available yet, wait up to `timeout` seconds for new updates
+                # If none available, long-poll until timeout for updates
+                timed_out = False
                 if not bones_list:
                     deadline = time.time() + LONGPOLL_DEFAULT_TIMEOUT
                     with _pending_updates_cond:
@@ -159,8 +198,18 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
                                     _, bone_name = k.split(":", 1)
                                     bones_list.append({"name": bone_name, "tr": _serialize_matrix(v)})
 
+                    if not bones_list:
+                        timed_out = True
+
                 response = {"armature_name": arm, "bones": bones_list}
                 self._send_json(response)
+
+                # If we timed out with no updates, consider the client's session
+                # ended so the next connection is treated as a new one.
+                if timed_out:
+                    with _matrices_lock:
+                        if client_host and client_host in _seen_clients:
+                            _seen_clients.discard(client_host)
             else:
                 self._send_json({"error": "not found"}, status=404)
         except Exception as e:
@@ -168,11 +217,27 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_json(self, data, status=200):
         payload = json.dumps(data, default=_json_default).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client disconnected while we were writing response. Treat this
+            # as a session end: drop seen state so the next connection gets
+            # a full snapshot.
+            try:
+                client_host = self.client_address[0]
+                with _matrices_lock:
+                    if client_host in _seen_clients:
+                        _seen_clients.discard(client_host)
+            except Exception:
+                pass
+            # Swallow socket errors - caller will detect connection closed.
+        except Exception:
+            # Re-raise unexpected exceptions to be handled by outer handler
+            raise
 
     def log_message(self, format, *args):
         # Silence default logging
@@ -200,6 +265,37 @@ def _serialize_matrix(matrix):
             return flat
         except Exception:
             return str(matrix)
+
+
+def _capture_initial_bones():
+    """
+    Capture a snapshot of the currently active armature's deform bone world
+    matrices into `_last_bone_matrices`. This provides an initial full
+    snapshot for the first client that connects.
+    """
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        obj = bpy.context.active_object
+        if not obj or obj.type != 'ARMATURE' or obj.mode != 'POSE':
+            return
+
+        obj_eval = obj.evaluated_get(depsgraph)
+        matrix_world = obj_eval.matrix_world
+        armature_name = obj.name
+
+        with _matrices_lock:
+            for pose_bone in obj_eval.pose.bones:
+                bone = getattr(pose_bone, "bone", None)
+                deform = True
+                if bone is not None:
+                    deform = getattr(bone, "use_deform", getattr(bone, "deform", True))
+                if not deform:
+                    continue
+                world_matrix = matrix_world @ pose_bone.matrix
+                bone_id = f"{armature_name}:{pose_bone.name}"
+                _last_bone_matrices[bone_id] = world_matrix.copy()
+    except Exception as e:
+        _debug_print("Failed to capture initial bones:", e)
 
 
 def _start_server():
@@ -276,6 +372,8 @@ def start_rigsync_server():
 
     # Attach the depsgraph handler (post update) and start the HTTP server
     try:
+        # Capture a snapshot of current bones so the first client gets a full list
+        _capture_initial_bones()
         bpy.app.handlers.depsgraph_update_post.append(check_bone_movement)
     except Exception as e:
         _debug_print("Warning: could not append handler:", e)
@@ -303,6 +401,7 @@ def stop_rigsync_server():
         _last_bone_matrices.clear()
         _last_active_armature = None
         _pending_updates.clear()
+        _seen_clients.clear()
     _debug_print("RigSync server DEACTIVATED.")
 
 

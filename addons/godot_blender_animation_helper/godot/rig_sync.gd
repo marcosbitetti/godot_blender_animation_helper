@@ -17,9 +17,6 @@ class_name BlenderRigSync
 
 @export_range(.15, 1., .05) var refresh_time : float = .25
 
-@export var debug := false
-
-
 var _connected := false
 var _http : HTTPRequest
 var _skeleton : Skeleton3D
@@ -81,11 +78,10 @@ func _apply_bones_from_body(body: PackedByteArray) -> bool:
 		return false
 
 	var body_text := body.get_string_from_utf8()
+	if body_text == null or body_text.is_empty(): return false
+	
 	var parse_result = JSON.parse_string(body_text)
-	if parse_result == null:
-		if debug:
-			push_error("BlenderRigSync: failed to parse JSON body")
-		return false
+	if parse_result == null: return false
 
 	var data : Dictionary = parse_result
 	
@@ -125,9 +121,6 @@ func _apply_bones_from_body(body: PackedByteArray) -> bool:
 			if idx >= 0:
 				_skeleton.set_bone_global_pose_override(idx, transform, 1.0, true)
 				applied = true
-		else:
-				if debug:
-					print("BlenderRigSync: parsed bone %s (no skeleton apply)" % name)
 
 	return applied
 
