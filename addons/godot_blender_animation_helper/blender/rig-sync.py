@@ -7,6 +7,18 @@ import json
 import urllib.parse
 import time
 
+bl_info = {
+    "name": "Rig Sync",
+    "author": "animation_helper",
+    "version": (0, 1),
+    "blender": (2, 80, 0),
+    "location": "View3D > Sidebar > Rig Sync",
+    "description": "Expose armature bone transforms via a local HTTP server and a simple N-panel toggle",
+    "category": "Animation",
+}
+
+from bpy.props import BoolProperty, IntProperty
+
 # Dicionário global para armazenar o último estado das matrizes dos bones
 # Isso evita que o evento seja disparado continuamente mesmo se o bone estiver parado
 _last_bone_matrices = {}
@@ -24,14 +36,22 @@ _server_thread = None
 class _ReusableThreadingHTTPServer(http.server.ThreadingHTTPServer):
     allow_reuse_address = True
 
+# Minimal debug toggle to avoid noisy logs in tight loops
+DEBUG = False
+
+def _debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+
 
 def meu_evento_bone_movido(bone_name, nova_matriz):
     """
     Este é o seu método/evento. Tudo o que quiser fazer com a nova 
     matriz do bone (enviar para uma API, salvar em arquivo, etc.) deve começar aqui.
     """
-    print(f"➔ [EVENTO] O bone '{bone_name}' mudou de posição!")
-    print(f"Nova Matriz Mundial:\n{nova_matriz}\n")
+    # Avoid heavy prints in normal operation; enable DEBUG to see these logs
+    _debug_print(f"➔ [EVENTO] O bone '{bone_name}' mudou de posição!")
+    _debug_print(f"Nova Matriz Mundial:\n{nova_matriz}\n")
 
 
 @bpy.app.handlers.persistent
@@ -194,8 +214,23 @@ def _stop_server():
         except Exception:
             pass
 
-        if _server_thread and _server_thread.is_alive():
-            _server_thread.join(timeout=2.0)
+        # wait briefly for the server thread to exit
+        if _server_thread:
+            total_wait = 0.0
+            timeout = 3.0
+            interval = 0.05
+            while _server_thread.is_alive() and total_wait < timeout:
+                _server_thread.join(timeout=interval)
+                total_wait += interval
+                time.sleep(0)
+            if _server_thread.is_alive():
+                _debug_print("RigSync: server thread did not stop within timeout")
+        # attempt to close socket descriptor to free port
+        try:
+            if hasattr(_server, 'socket') and _server.socket:
+                _server.socket.close()
+        except Exception:
+            pass
     except Exception as e:
         print("Error stopping server:", e)
     finally:
@@ -204,9 +239,9 @@ def _stop_server():
         print("RigSync HTTP server stopped.")
 
 
-def register():
-    # Limpa handlers antigos idênticos para evitar duplicidade ao rodar o script várias vezes
-    unregister()
+def start_rigsync_server():
+    # ensure previous server state stopped to avoid duplicates
+    stop_rigsync_server()
 
     # Adiciona o listener ao depsgraph (pós-atualização de dependências)
     try:
@@ -216,14 +251,16 @@ def register():
 
     # Start internal HTTP server
     _start_server()
-    print("Plugin de monitoramento de Bones ATIVADO.")
+    print("RigSync server ACTIVATED.")
 
 
-def unregister():
+def stop_rigsync_server():
     # Remove o handler ao desativar o plugin
     try:
-        if checar_movimento_bone in bpy.app.handlers.depsgraph_update_post:
-            bpy.app.handlers.depsgraph_update_post.remove(checar_movimento_bone)
+        handlers = bpy.app.handlers.depsgraph_update_post
+        # remove all occurrences to ensure handler is fully unregistered
+        while checar_movimento_bone in handlers:
+            handlers.remove(checar_movimento_bone)
     except Exception:
         pass
 
@@ -235,7 +272,54 @@ def unregister():
         _last_bone_matrices.clear()
         _last_active_armature = None
         _pending_updates.clear()
-    print("Plugin de monitoramento de Bones DESATIVADO.")
+    print("RigSync server DEACTIVATED.")
+
+
+# UI integration: a simple checkbox in the N-panel to enable/disable the server
+def _on_rig_sync_toggle(self, context):
+    scene = context.scene
+    if getattr(scene, "rig_sync_enabled", False):
+        start_rigsync_server()
+    else:
+        stop_rigsync_server()
+
+
+class RIGSYNC_PT_panel(bpy.types.Panel):
+    bl_label = "Rig Sync"
+    bl_idname = "RIGSYNC_PT_panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Rig Sync'
+
+    def draw(self, context):
+        layout = self.layout
+        sc = context.scene
+        layout.prop(sc, "rig_sync_enabled", text="Enable Rig Sync Server")
+
+
+def register():
+    bpy.utils.register_class(RIGSYNC_PT_panel)
+    bpy.types.Scene.rig_sync_enabled = BoolProperty(
+        name="Rig Sync Server",
+        description="Run local server that exposes bone transforms",
+        default=False,
+        update=_on_rig_sync_toggle,
+    )
+    print("Rig Sync addon registered")
+
+
+def unregister():
+    # ensure server stopped before unregistering
+    try:
+        stop_rigsync_server()
+    except Exception:
+        pass
+    try:
+        del bpy.types.Scene.rig_sync_enabled
+    except Exception:
+        pass
+    bpy.utils.unregister_class(RIGSYNC_PT_panel)
+    print("Rig Sync addon unregistered")
 
 
 if __name__ == "__main__":
