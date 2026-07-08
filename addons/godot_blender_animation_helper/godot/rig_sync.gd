@@ -63,7 +63,15 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 
 
 func _find_skel() -> void:
-	_skeleton = get_parent().find_child(skeleton_name, true, false)
+	_skeleton = __find_skel(get_parent())
+
+func __find_skel(base : Node) -> Skeleton3D:
+	for c : Node in base.get_children():
+		if c is Skeleton3D:
+			if c.visible: return c
+		var ret : Skeleton3D = __find_skel(c)
+		if ret: return ret
+	return null
 
 func _do_request() -> void:
 	_http.request("http://127.0.0.1:8872/bones", PackedStringArray(), HTTPClient.METHOD_GET)
@@ -111,11 +119,10 @@ func _apply_bones_from_body(body: PackedByteArray) -> bool:
 		var transform := Transform3D(basis, origin)
 
 		# Apply transform to skeleton if possible
-		if _skeleton and _skeleton.has_method("find_bone") and _skeleton.has_method("set_bone_global_pose_override"):
-			var idx := _skeleton.find_bone(name)
-			if idx >= 0:
-				_skeleton.set_bone_global_pose_override(idx, transform, 1.0, true)
-				applied = true
+		var idx := _skeleton.find_bone(name)
+		if idx >= 0:
+			_skeleton.set_bone_global_pose_override(idx, transform, 1.0, true)
+			applied = true
 
 	return applied
 
