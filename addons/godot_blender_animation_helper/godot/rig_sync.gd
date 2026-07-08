@@ -31,8 +31,6 @@ func _ready() -> void:
 	# Connect HTTPRequest signals for completion and timeout handling.
 	if not _http.is_connected("request_completed", _on_http_request_completed):
 		_http.connect("request_completed", _on_http_request_completed)
-	#if not _http.is_connected("connection_timeout", _on_http_connection_timeout):
-		#_http.connect("connection_timeout", _on_http_connection_timeout)
 	
 func _get_configuration_warnings() -> PackedStringArray:
 	var warnings := PackedStringArray()
@@ -63,9 +61,6 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 		else:
 			get_tree().create_timer(refresh_time).timeout.connect(_do_request)
 
-func _on_http_connection_timeout() -> void:
-	_connected = false
-	update_configuration_warnings()
 
 func _find_skel() -> void:
 	_skeleton = get_parent().find_child(skeleton_name, true, false)

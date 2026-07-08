@@ -1,5 +1,4 @@
 import bpy
-from mathutils import Matrix
 import threading
 import http.server
 import socket
@@ -17,7 +16,7 @@ bl_info = {
     "category": "Animation",
 }
 
-from bpy.props import BoolProperty, IntProperty
+from bpy.props import BoolProperty
 
 # Global dictionary to store the last known bone matrices.
 # This prevents firing the update event continuously when a bone hasn't changed.
@@ -109,8 +108,7 @@ def check_bone_movement(scene, depsgraph):
                     _pending_updates[bone_id] = world_matrix.copy()
                     try:
                         # Notify any long-poll waiters that an update is available
-                        with _pending_updates_cond:
-                            _pending_updates_cond.notify_all()
+                        _pending_updates_cond.notify_all()
                     except Exception:
                         pass
 
@@ -239,9 +237,7 @@ class _BoneRequestHandler(http.server.BaseHTTPRequestHandler):
             # Re-raise unexpected exceptions to be handled by outer handler
             raise
 
-    def log_message(self, format, *args):
-        # Silence default logging
-        return
+    
 
 
 def _json_default(obj):
@@ -384,7 +380,7 @@ def start_rigsync_server():
 
 
 def stop_rigsync_server():
-    # Remove o handler ao desativar o plugin
+    # Remove the handler when disabling the addon
     try:
         handlers = bpy.app.handlers.depsgraph_update_post
         # remove all occurrences to ensure handler is fully unregistered
