@@ -1,15 +1,62 @@
 [gd_scene format=3 uid="uid://bgfvak63c5hgh"]
 
 [ext_resource type="PackedScene" uid="uid://d0y3nr3r2clc7" path="res://addons/godot_blender_animation_helper/example/rig.glb" id="1_mtqaj"]
+[ext_resource type="Script" uid="uid://b7btg1gaipvbv" path="res://addons/godot_blender_animation_helper/example/rig.gd" id="1_ul5b7"]
+[ext_resource type="Texture2D" uid="uid://bhxnninnyhm5c" path="res://addons/godot_blender_animation_helper/example/Mysta_texture_csp_v4.png" id="2_0dayj"]
 [ext_resource type="Script" uid="uid://bixojhvi0rn2r" path="res://addons/godot_blender_animation_helper/godot/rig_sync.gd" id="2_nktgo"]
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ul5b7"]
+diffuse_mode = 3
+specular_mode = 1
+albedo_texture = ExtResource("2_0dayj")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_xnxc3"]
+albedo_color = Color(0.45921612, 0.97409385, 0.41006038, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bdmyc"]
+albedo_color = Color(0.44313726, 0.59607846, 1, 1)
+
 [node name="Rig" type="Node3D" unique_id=988870244]
+script = ExtResource("1_ul5b7")
 
 [node name="rig" parent="." unique_id=1143913702 instance=ExtResource("1_mtqaj")]
 
+[node name="Mysta_GEO" parent="rig/rig/Skeleton3D" parent_id_path=PackedInt32Array(1143913702, 1071696147) index="0" unique_id=1320388358]
+material_override = SubResource("StandardMaterial3D_ul5b7")
+
+[node name="Mysta_Outline" parent="rig/rig/Skeleton3D" parent_id_path=PackedInt32Array(1143913702, 1071696147) index="1" unique_id=1560612229]
+visible = false
+
 [node name="BlenderRigSync" type="Node" parent="." unique_id=1494717528]
 script = ExtResource("2_nktgo")
-debug = false
 metadata/_custom_type_script = "uid://bixojhvi0rn2r"
+
+[node name="CSGCombiner3D" type="CSGCombiner3D" parent="." unique_id=155948810]
+
+[node name="CSGBox3D" type="CSGBox3D" parent="CSGCombiner3D" unique_id=761091977]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.40203857, -0.25512695, -1.3161621)
+size = Vector3(8.06897, 0.4897461, 7.2055664)
+material = SubResource("StandardMaterial3D_xnxc3")
+
+[node name="CSGCylinder3D" type="CSGCylinder3D" parent="CSGCombiner3D" unique_id=36915806]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.4227507, 0.02722168, 1.0668931)
+height = 1.057373
+sides = 16
+material = SubResource("StandardMaterial3D_bdmyc")
+
+[node name="CSGCylinder3D2" type="CSGCylinder3D" parent="CSGCombiner3D" unique_id=2112795592]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.3845512, 0.34344494, -2.1434085)
+height = 1.6898193
+sides = 16
+material = SubResource("StandardMaterial3D_bdmyc")
+
+[node name="CSGCylinder3D3" type="CSGCylinder3D" parent="CSGCombiner3D" unique_id=589420530]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.1902546, 0.34344494, -2.1434085)
+height = 1.6898193
+sides = 16
+material = SubResource("StandardMaterial3D_bdmyc")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=208577335]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7857839, 1.125615)
 
 [editable path="rig"]
