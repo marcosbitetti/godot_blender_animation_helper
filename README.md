@@ -1,37 +1,42 @@
 # Godot Blender Animation Helper
 
-This tool help users to produce cinematic animations providing a real time preview of model inside Godot Editor from Blender.
+This tool helps users produce cinematic animations by providing a real-time preview of a model inside the Godot Editor from Blender.
 
 ## Usage and Workflow
 
-**first step:**
+**First step:**
 
 ### Blender
 
-1. install addon `Edit -> Preferences -> Add-ons` and load from disk: `addons/godot_blender_animation_helper/blender/rig-sync.py`
-1. find `Rig Sync` on add-ons list and enable it
-1. in 3D View open properties menu (shortcut: N)
-1. find `Rig Sync` tab and enable it
+**Recommended:** version 5.0+
 
-**second step:**
+1. Install the add-on (`Edit -> Preferences -> Add-ons`) and choose the "load from disk" option: `addons/godot_blender_animation_helper/blender/rig-sync.py`.
+1. Find `Rig Sync` in the add-ons list and enable it.
+1. In the 3D View, open the properties menu (shortcut: N).
+1. Find the `Rig Sync` tab and enable it.
+
+**Second step:**
 
 ### Godot
 
-1. **o need** to enable plugins!
-1. click on node that contains the desired `Skeleton3D`
-    * **plus**: if you exported model have mora than one `Skeleton3D` you can hide the no desired node to found just correct one
-1. click to add child node and find `BlenderRigSync` and add it
-1. select it, and change `Skeleton name` if it needed
-1. click enable
-1. it make current model update they bones to same as in Blender editor
+**Recommended:** version 4.5+
 
-**third step:**
+1. No need to enable plugins!
+1. Click on the node that contains the desired `Skeleton3D`.
+    * **Plus**: if your exported model has more than one `Skeleton3D`, you can hide the undesired node(s) to find the correct one.
+1. Click to add a child node, find `BlenderRigSync`, and add it.
+1. Select it, and change `Skeleton name` if needed.
+1. Click Enable.
+1. It makes the current model update its bones to match those in the Blender editor.
 
-When you move bones on Blender it sync on Godot!
+**Third step:**
 
-When end the task click to disable checkboxes on two editors.
 
-*It can help you to integrate you animation on Godot from Blender*
+When you move bones in Blender, the changes sync to Godot!
+
+When the task is finished, click to disable the checkboxes in both editors.
+
+*It can help you integrate your animation into Godot from Blender*
 
 *Video tutorial:* [youtube](http://lala)
 
