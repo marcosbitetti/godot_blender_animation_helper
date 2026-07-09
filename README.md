@@ -19,6 +19,7 @@ This tool help users to produce cinematic animations providing a real time previ
 
 1. **o need** to enable plugins!
 1. click on node that contains the desired `Skeleton3D`
+    * **plus**: if you exported model have mora than one `Skeleton3D` you can hide the no desired node to found just correct one
 1. click to add child node and find `BlenderRigSync` and add it
 1. select it, and change `Skeleton name` if it needed
 1. click enable
@@ -34,7 +35,12 @@ When end the task click to disable checkboxes on two editors.
 
 *Video tutorial:* [youtube](http://lala)
 
-## Extra Credits
+## Credits
+
+- **Maintainer**: Marcos Bitetti — GitHub: https://github.com/marcosbitetti — YouTube: https://www.youtube.com/@NerdOfTheMountain
+- **Project License**: MIT License — see LICENSE or https://opensource.org/licenses/MIT
+
+### Extra Credits
 
 - **Model**: Mysta Chibi
 - **Author**: Macchimin (@Macchimin)

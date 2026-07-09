@@ -13,13 +13,17 @@ class_name BlenderRigSync
 	set(v):
 		enabled = v
 		update_configuration_warnings()
-		if enabled: _do_request()
+		if enabled:
+			_do_request()
+		else:
+			_clear_modified_bones()
 
 @export_range(.15, 1., .05) var refresh_time : float = .25
 
 var _connected := false
 var _http : HTTPRequest
 var _skeleton : Skeleton3D
+var _modified_bones := []
 
 func _ready() -> void:
 	if not Engine.is_editor_hint(): return
@@ -123,8 +127,30 @@ func _apply_bones_from_body(body: PackedByteArray) -> bool:
 		if idx >= 0:
 			_skeleton.set_bone_global_pose_override(idx, transform, 1.0, true)
 			applied = true
+			# record that we modified this bone so we can clear it when disabled
+			if idx not in _modified_bones:
+				_modified_bones.append(idx)
 
 	return applied
+
+
+func _clear_modified_bones() -> void:
+	# Restore zero influence for bones we modified and free control.
+	if not _skeleton:
+		_modified_bones.clear()
+		return
+
+	var bone_count := _skeleton.get_bone_count()
+	for idx in _modified_bones:
+		# set weight to 0.0 to remove override influence
+		_skeleton.set_bone_global_pose_override(idx, Transform3D(), 0.0, true)
+
+	_modified_bones.clear()
+
+
+func _exit_tree() -> void:
+	# Ensure we clear any applied overrides when the node is removed.
+	_clear_modified_bones()
 
 func _blender_to_godot_vec3(v: Vector3) -> Vector3:
 	# Map Blender coordinates (X right, Y forward, Z up)
