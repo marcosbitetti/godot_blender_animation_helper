@@ -38,7 +38,7 @@ When the task is finished, click to disable the checkboxes in both editors.
 
 *It can help you integrate your animation into Godot from Blender*
 
-*Video tutorial:* [youtube](http://lala)
+*Video tutorial:* [youtube](https://www.youtube.com/watch?v=C-myMbrMoDA)
 
 ## Credits
 
